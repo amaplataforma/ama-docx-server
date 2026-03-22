@@ -1,5 +1,4 @@
 'use strict';
-
 const express = require('express');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -9,8 +8,8 @@ const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const Anthropic = require('@anthropic-ai/sdk');
-const execFileAsync = promisify(execFile);
 
+const execFileAsync = promisify(execFile);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -136,7 +135,6 @@ app.post('/extract-bioimpedance', async (req, res) => {
     const EXTRACTION_PROMPT = `Você está analisando um relatório de bioimpedanciometria. Extraia todos os valores numéricos e retorne APENAS um objeto JSON válido, sem markdown, sem texto adicional, sem comentários.
 
 Mapeie os dados para exatamente estes campos (retorne null se o campo não existir no relatório):
-
 {
   "equipamento_detectado": "string com nome do equipamento identificado",
   "campos": {
@@ -240,8 +238,7 @@ Regras:
 
         // Parse robusto: remove possíveis backticks de markdown que o modelo possa emitir
         let rawText = extractionMsg.content[0].text.trim();
-        rawText = rawText.replace(/^```(?:json)?s*/i, '').replace(/s*```s*$/i, '');
-
+        rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
         let extractedData;
         try {
             extractedData = JSON.parse(rawText);
@@ -286,6 +283,7 @@ Regras:
         res.status(500).json({ sucesso: false, error: error.message });
     }
 });
+
 
 app.post('/generate-docx', async (req, res) => {
     const jobId = uuidv4();
@@ -398,7 +396,6 @@ app.post('/generate-docx', async (req, res) => {
                          console.error('[T28B] Erro stream:', err.message);
                          await cleanup();
                  });
-
            } catch (err) {
                  clearTimeout(timeoutHandle);
                  console.error('[T28B] Erro nao capturado ' + jobId + ':', err.stack || err.message);
@@ -408,213 +405,201 @@ app.post('/generate-docx', async (req, res) => {
 });
 
 // ============================================================
-// EXTRACT CALORIMETRIA — D2
+// PROXY UPLOAD LOGO — R04-B
+// Recebe arquivo de imagem via multipart/form-data
+// Salva no Google Drive na pasta AMA_Uploads/Clinicas/{id_clinica}/logo/
+// Retorna URL pública do arquivo
+// Variável de ambiente necessária: GOOGLE_SERVICE_ACCOUNT_JSON
 // ============================================================
-app.options('/extract-calorimetria', (req, res) => {
-  res.set({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-  });
-  res.sendStatus(200);
+
+app.options('/proxy-upload-logo', function(req, res) {
+    res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
+    });
+    res.sendStatus(200);
 });
 
-app.post('/extract-calorimetria', async (req, res) => {
-  res.set({
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-  });
-
-  const { file_base64, file_type, equipamento_hint } = req.body;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY nao configurada no servidor.' });
-  }
-
-  if (!file_base64 || !file_type) {
-    return res.status(400).json({ error: 'file_base64 e file_type sao obrigatorios.' });
-  }
-
-  const tiposImagem = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  const tiposDoc = ['application/pdf'];
-  const tipoValido = [...tiposImagem, ...tiposDoc].includes(file_type);
-
-  if (!tipoValido) {
-    return res.status(400).json({ error: 'Tipo de arquivo nao suportado: ' + file_type });
-  }
-
-  const anthropic = new Anthropic({ apiKey });
-
-  const EXTRACTION_PROMPT = 'Voce e um extrator especializado em laudos de calorimetria indireta medica. Extraia todos os campos e retorne APENAS um JSON valido, sem texto adicional. Equipamento hint: ' + (equipamento_hint || 'desconhecido') + '. JSON esperado: {"sucesso":true,"campos":{"cal_data":null,"cal_equipamento":null,"cal_tmr_kcal":null,"cal_tmb_kcal":null,"cal_tmb_previsto_kcal":null,"cal_get_kcal":null,"cal_rq":null,"cal_gordura_percentual":null,"cal_carboidrato_percentual":null,"cal_vo2_ml_kg_min":null,"cal_ve_l_min":null,"cal_estilo_vida":null},"confianca":{"cal_data":"baixa","cal_equipamento":"baixa","cal_tmr_kcal":"baixa","cal_tmb_kcal":"baixa","cal_tmb_previsto_kcal":"baixa","cal_get_kcal":"baixa","cal_rq":"baixa","cal_gordura_percentual":"baixa","cal_carboidrato_percentual":"baixa","cal_vo2_ml_kg_min":"baixa","cal_ve_l_min":"baixa","cal_estilo_vida":"baixa"},"comentario_clinico":"resumo em 2-3 frases em portugues"}';
-
-  const fileContentBlock = tiposDoc.includes(file_type)
-    ? { type: 'document', source: { type: 'base64', media_type: file_type, data: file_base64 } }
-    : { type: 'image', source: { type: 'base64', media_type: file_type, data: file_base64 } };
-
-  try {
-    const extractionMsg = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
-      messages: [{
-        role: 'user',
-        content: [
-          fileContentBlock,
-          { type: 'text', text: EXTRACTION_PROMPT }
-        ]
-      }]
+app.post('/proxy-upload-logo', upload.single('logo'), async function(req, res) {
+    res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
     });
 
-    let rawText = extractionMsg.content[0].text.trim();
-    rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
-
-    let extractedData;
     try {
-      extractedData = JSON.parse(rawText);
-    } catch (parseErr) {
-      console.error('[extract-calorimetria] JSON parse falhou:', rawText.slice(0, 300));
-      return res.status(500).json({ sucesso: false, error: 'Falha ao interpretar resposta.', raw: rawText.slice(0, 500) });
-    }
+        if (!req.file) {
+            return res.status(400).json({ error: 'Arquivo de logo ausente' });
+        }
 
-    res.json({
-      sucesso: true,
-      campos: extractedData.campos || {},
-      confianca: extractedData.confianca || {},
-      comentario_clinico: extractedData.comentario_clinico || ''
+        var idClinica = req.body.id_clinica || 'SEM_ID';
+
+        // Validar tipo de arquivo
+        var tiposPermitidos = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+        if (!tiposPermitidos.includes(req.file.mimetype)) {
+            return res.status(400).json({ error: 'Tipo de arquivo nao permitido. Use JPG, PNG, GIF, WEBP ou SVG.' });
+        }
+
+        // Validar tamanho (max 5MB)
+        if (req.file.size > 5 * 1024 * 1024) {
+            return res.status(400).json({ error: 'Arquivo muito grande. Maximo 5MB.' });
+        }
+
+        // Carregar service account
+        var saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+        if (!saJson) {
+            return res.status(500).json({ error: 'GOOGLE_SERVICE_ACCOUNT_JSON nao configurada no servidor' });
+        }
+
+        var sa;
+        try {
+            sa = JSON.parse(saJson);
+        } catch (e) {
+            return res.status(500).json({ error: 'GOOGLE_SERVICE_ACCOUNT_JSON invalida: ' + e.message });
+        }
+
+        // Gerar JWT para autenticação com Google
+        var jwt = await gerarJwtGoogle(sa);
+        var accessToken = await obterAccessToken(jwt);
+
+        // Buscar ou criar estrutura de pastas no Drive
+        var pastaRaizId = await buscarOuCriarPasta(accessToken, 'AMA_Uploads', null);
+        var pastaClinicasId = await buscarOuCriarPasta(accessToken, 'Clinicas', pastaRaizId);
+        var pastaClinicaId = await buscarOuCriarPasta(accessToken, idClinica, pastaClinicasId);
+        var pastaLogoId = await buscarOuCriarPasta(accessToken, 'logo', pastaClinicaId);
+
+        // Fazer upload do arquivo
+        var extensao = req.file.originalname.split('.').pop() || 'png';
+        var nomeArquivo = 'logo_' + idClinica + '_' + Date.now() + '.' + extensao;
+
+        var fileId = await uploadArquivoDrive(accessToken, req.file.buffer, req.file.mimetype, nomeArquivo, pastaLogoId);
+
+        // Tornar público
+        await tornarPublico(accessToken, fileId);
+
+        // Retornar URL
+        var url = 'https://drive.google.com/uc?export=view&id=' + fileId;
+
+        res.json({
+            sucesso: true,
+            logo_url: url,
+            file_id: fileId,
+            nome: nomeArquivo
+        });
+
+    } catch (err) {
+        console.error('[proxy-upload-logo] Erro:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── Funções auxiliares Drive ──────────────────────────────────
+
+async function gerarJwtGoogle(sa) {
+    var header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+    var now = Math.floor(Date.now() / 1000);
+    var payload = Buffer.from(JSON.stringify({
+        iss: sa.client_email,
+        scope: 'https://www.googleapis.com/auth/drive',
+        aud: 'https://oauth2.googleapis.com/token',
+        iat: now,
+        exp: now + 3600
+    })).toString('base64url');
+
+    var crypto = require('crypto');
+    var sign = crypto.createSign('RSA-SHA256');
+    sign.update(header + '.' + payload);
+    var signature = sign.sign(sa.private_key, 'base64url');
+
+    return header + '.' + payload + '.' + signature;
+}
+
+async function obterAccessToken(jwt) {
+    var resp = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=' + jwt
     });
-
-  } catch (error) {
-    console.error('[extract-calorimetria] Erro:', error);
-    res.status(500).json({ sucesso: false, error: error.message });
-  }
-});
-
-
-// ============================================================
-// ENDPOINT D3 — ERGOESPIROMETRIA + ZONAS DE TREINO
-// ============================================================
-app.options('/extract-ergoespirometria', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  res.sendStatus(200);
-});
-
-app.post('/extract-ergoespirometria', async (req, res) => {
-  try {
-    const { file_base64, file_type, equipamento_hint } = req.body;
-    if (!file_base64) {
-      return res.status(400).json({ sucesso: false, error: 'file_base64 obrigatorio' });
+    var data = await resp.json();
+    if (!data.access_token) {
+        throw new Error('Falha ao obter access token: ' + JSON.stringify(data));
     }
-    const isExcel = file_type && (
-      file_type.includes('spreadsheet') ||
-      file_type.includes('excel') ||
-      file_type.includes('xlsx')
-    );
-    const resultado = isExcel
-      ? await extrairErgoDoExcel(file_base64)
-      : await extrairErgoDoPdf(file_base64, file_type, equipamento_hint);
-    res.json(resultado);
-  } catch (error) {
-    console.error('Erro /extract-ergoespirometria:', error);
-    res.status(500).json({ sucesso: false, error: error.message });
-  }
-});
-
-async function extrairErgoDoExcel(file_base64) {
-  const XLSX = require('xlsx');
-  const buffer = Buffer.from(file_base64, 'base64');
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
-  if (!rows || rows.length === 0) {
-    return { sucesso: false, error: 'Excel vazio ou formato nao reconhecido' };
-  }
-  const get = (row, ...keys) => {
-    for (const k of keys) {
-      const found = Object.keys(row).find(rk => rk.toLowerCase().includes(k.toLowerCase()));
-      if (found !== undefined && row[found] !== null) return parseFloat(row[found]) || row[found];
-    }
-    return null;
-  };
-  const dadosBrutos = rows.map(row => ({
-    estagio:        get(row, 'est', 'stage'),
-    tempo_min:      get(row, 'tempo', 'time', 'min'),
-    fc:             get(row, 'fc', 'hr', 'heart'),
-    vo2_ml_kg_min:  get(row, 'vo2'),
-    vco2:           get(row, 'vco2'),
-    ve:             get(row, 've', 'vent'),
-    rer:            get(row, 'rer', 'rq'),
-    oxi_gord_g_min: get(row, 'oxi gord', 'fat', 'gord'),
-    oxi_cho_g_min:  get(row, 'oxi cho', 'cho', 'carb'),
-    perc_gord:      get(row, '% gord', '%gord', 'fat%'),
-    perc_cho:       get(row, '% cho', '%cho', 'cho%'),
-    vel_km_h:       get(row, 'vel', 'speed', 'km')
-  })).filter(r => r.fc !== null);
-
-  let fatmaxEstagio = null, fatmaxVal = -Infinity;
-  dadosBrutos.forEach(r => {
-    if (r.oxi_gord_g_min !== null && r.oxi_gord_g_min > fatmaxVal) {
-      fatmaxVal = r.oxi_gord_g_min;
-      fatmaxEstagio = r;
-    }
-  });
-
-  const promptLimiares = `Analise estes dados de ergoespirometria estagio a estagio e identifique L1 (primeiro limiar ventilatorio) e L2 (segundo limiar ventilatorio). Retorne APENAS JSON valido:\n{"ergo_l1_fc":numero,"ergo_l1_vel_km_h":numero,"ergo_l2_fc":numero,"ergo_l2_vel_km_h":numero,"ergo_fc_repouso":numero,"ergo_fc_max":numero,"ergo_vo2max_ml_kg_min":numero,"ergo_protocolo":"texto ou null","ergo_equipamento":"HandyMet MDI","ergo_data":null}\nDados: ${JSON.stringify(dadosBrutos.slice(0, 30))}`;
-
-  const respLimiares = await anthropic.messages.create({
-    model: 'claude-opus-4-5', max_tokens: 800,
-    messages: [{ role: 'user', content: promptLimiares }]
-  });
-  const campos = JSON.parse(respLimiares.content[0].text.trim().replace(/```json|```/g, '').trim());
-
-  const l1 = campos.ergo_l1_fc, l2 = campos.ergo_l2_fc;
-  const fcMax = campos.ergo_fc_max, fcRep = campos.ergo_fc_repouso;
-
-  const promptComentario = `Voce e o Dr. Mateus Antunes Nogueira, especialista em medicina do exercicio. Escreva comentario clinico em 2-3 frases, primeira pessoa, tom tecnico direto. Va ao achado mais relevante. Proibido: robusto, crucial, abordagem.\nDados: L1=${l1}bpm, L2=${l2}bpm, VO2max=${campos.ergo_vo2max_ml_kg_min}ml/kg/min, FATmax=${fatmaxEstagio ? fatmaxEstagio.oxi_gord_g_min : null}g/min a ${fatmaxEstagio ? fatmaxEstagio.fc : null}bpm`;
-
-  const respComentario = await anthropic.messages.create({
-    model: 'claude-opus-4-5', max_tokens: 300,
-    messages: [{ role: 'user', content: promptComentario }]
-  });
-
-  return {
-    sucesso: true,
-    campos: {
-      ...campos,
-      ergo_fatmax_fc: fatmaxEstagio ? fatmaxEstagio.fc : null,
-      ergo_fatmax_vel_km_h: fatmaxEstagio ? fatmaxEstagio.vel_km_h : null,
-      ergo_fatmax_g_min: fatmaxEstagio ? fatmaxEstagio.oxi_gord_g_min : null,
-      zona_1_fc_min: fcRep, zona_1_fc_max: Math.round(l1 * 0.85),
-      zona_2_fc_min: Math.round(l1 * 0.85), zona_2_fc_max: l1,
-      zona_3_fc_min: l1, zona_3_fc_max: Math.round((l1 + l2) / 2),
-      zona_4_fc_min: Math.round((l1 + l2) / 2), zona_4_fc_max: l2,
-      zona_5_fc_min: l2, zona_5_fc_max: fcMax
-    },
-    confianca: Object.fromEntries(
-      ['ergo_data','ergo_equipamento','ergo_protocolo','ergo_fc_repouso','ergo_fc_max',
-       'ergo_vo2max_ml_kg_min','ergo_l1_fc','ergo_l1_vel_km_h','ergo_l2_fc','ergo_l2_vel_km_h',
-       'ergo_fatmax_fc','ergo_fatmax_vel_km_h','ergo_fatmax_g_min',
-       'zona_1_fc_min','zona_1_fc_max','zona_2_fc_min','zona_2_fc_max',
-       'zona_3_fc_min','zona_3_fc_max','zona_4_fc_min','zona_4_fc_max',
-       'zona_5_fc_min','zona_5_fc_max'].map(k => [k, 'alta'])
-    ),
-    ergo_dados_brutos: dadosBrutos,
-    comentario_clinico: respComentario.content[0].text.trim()
-  };
+    return data.access_token;
 }
 
-async function extrairErgoDoPdf(file_base64, file_type, equipamento_hint) {
-  const response = await anthropic.messages.create({
-    model: 'claude-opus-4-5', max_tokens: 3000,
-    messages: [{ role: 'user', content: [
-      { type: 'document', source: { type: 'base64', media_type: file_type || 'application/pdf', data: file_base64 } },
-      { type: 'text', text: `Extrator de ergoespirometria. Retorne APENAS JSON:\n{"sucesso":true,"campos":{"ergo_data":"DD/MM/AAAA ou null","ergo_equipamento":"nome ou null","ergo_protocolo":"texto ou null","ergo_fc_repouso":numero,"ergo_fc_max":numero,"ergo_vo2max_ml_kg_min":numero,"ergo_l1_fc":numero,"ergo_l1_vel_km_h":numero,"ergo_l2_fc":numero,"ergo_l2_vel_km_h":numero,"ergo_fatmax_fc":numero,"ergo_fatmax_vel_km_h":numero,"ergo_fatmax_g_min":numero,"zona_1_fc_min":numero,"zona_1_fc_max":numero,"zona_2_fc_min":numero,"zona_2_fc_max":numero,"zona_3_fc_min":numero,"zona_3_fc_max":numero,"zona_4_fc_min":numero,"zona_4_fc_max":numero,"zona_5_fc_min":numero,"zona_5_fc_max":numero},"confianca":{},"ergo_dados_brutos":[],"comentario_clinico":"2-3 frases em portugues, primeira pessoa."}\nEquipamento: ${equipamento_hint || 'HandyMet MDI'}` }
-    ]}]
-  });
-  return JSON.parse(response.content[0].text.trim().replace(/```json|```/g, '').trim());
+async function buscarOuCriarPasta(token, nome, parentId) {
+    // Buscar pasta existente
+    var query = "mimeType='application/vnd.google-apps.folder' and name='" + nome + "' and trashed=false";
+    if (parentId) query += " and '" + parentId + "' in parents";
+
+    var resp = await fetch('https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(query) + '&fields=files(id,name)', {
+        headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await resp.json();
+
+    if (data.files && data.files.length > 0) {
+        return data.files[0].id;
+    }
+
+    // Criar pasta
+    var meta = { name: nome, mimeType: 'application/vnd.google-apps.folder' };
+    if (parentId) meta.parents = [parentId];
+
+    var createResp = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(meta)
+    });
+    var created = await createResp.json();
+    if (!created.id) throw new Error('Falha ao criar pasta ' + nome + ': ' + JSON.stringify(created));
+    return created.id;
 }
+
+async function uploadArquivoDrive(token, buffer, mimetype, nome, parentId) {
+    var meta = JSON.stringify({ name: nome, parents: [parentId] });
+    var boundary = '-------AMAUploadBoundary';
+    var delimiter = '\r\n--' + boundary + '\r\n';
+    var closeDelimiter = '\r\n--' + boundary + '--';
+
+    var metaPart = delimiter + 'Content-Type: application/json\r\n\r\n' + meta;
+    var filePart = delimiter + 'Content-Type: ' + mimetype + '\r\n\r\n';
+    var closepart = closeDelimiter;
+
+    var metaBuffer = Buffer.from(metaPart);
+    var filePartBuffer = Buffer.from(filePart);
+    var closeBuffer = Buffer.from(closepart);
+    var body = Buffer.concat([metaBuffer, filePartBuffer, buffer, closeBuffer]);
+
+    var resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'multipart/related; boundary=' + boundary,
+            'Content-Length': body.length
+        },
+        body: body
+    });
+    var data = await resp.json();
+    if (!data.id) throw new Error('Falha no upload: ' + JSON.stringify(data));
+    return data.id;
+}
+
+async function tornarPublico(token, fileId) {
+    await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '/permissions', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    });
+}
+
+
 app.listen(PORT, () => {
     console.log('[T29B] AMA Docx Server porta ' + PORT + ' - T29B corrigido');
 });
